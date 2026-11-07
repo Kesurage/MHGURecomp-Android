@@ -129,8 +129,10 @@ jobs:
           mkdir -p build-android/lib/arm64-v8a build-android/bonus
           cp /tmp/libmhgugame.so build-android/lib/arm64-v8a/libmhgugame.so
           cp /tmp/bonus/system build-android/bonus/system
-          # newer than every object, so dist packs it instead of rebuilding it from a dump we don't have
-          touch build-android/lib/arm64-v8a/libmhgugame.so
+          # A timestamp in the future, so make packs this file instead of relinking it from a dump we
+          # don't have (dist builds the game library's objects, which would then be newer than a plain
+          # touch could keep ahead of).
+          touch -d "2099-01-01 00:00 UTC" build-android/lib/arm64-v8a/libmhgugame.so
 
       - name: Pack and sign the APK
         run: |
