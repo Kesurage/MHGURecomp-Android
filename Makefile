@@ -178,6 +178,16 @@ endif
 GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
                 runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(GENFLAGS)') | sha256sum | cut -c1-16)
+# If the game code library is placed prebuilt (Android release builds take it from the official APK: no game dump
+# exists here), the runtime is compiled with that library's own id: the game refuses another one at startup
+# (runtime/gamelib.c). With a dump (generated/ holds sources) the id is hashed from the sources as always. The placed
+# file must exist before make runs (the CI workflow places it before the build; android/apk.mk re-checks the pair).
+ifeq ($(strip $(GEN_SRC)),)
+PLACED_GAMELIB_ID := $(shell f=$(GAMELIB); [ -f "$$f" ] && strings -a "$$f" | grep -E '^[0-9a-f]{16}$$' | grep -v '^0\+$$' | head -1)
+ifneq ($(PLACED_GAMELIB_ID),)
+GAMELIB_ID := $(PLACED_GAMELIB_ID)
+endif
+endif
 # GEN_ID: what decides the code in generated/. make gen records it there and make dist refuses a release without a match:
 # neither make nor the game notices stale game code, GAMELIB_ID hashes the sources above and not what they generated.
 # (Line endings ignored: Windows and WSL builds share one generated/.)

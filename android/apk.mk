@@ -43,6 +43,12 @@ DIST_APK     = $(DIST)/Android-MHGURecomp.$(VERSION).apk
 
 # $(call pack_apk,<apk>,<ABIs>,<apksigner's key options>)
 define pack_apk
+	# The game refuses a game code library whose GAMELIB_ID the runtime wasn't compiled with (runtime/gamelib.c):
+	# the placed library's id must appear among libmain.so's strings (it carries the GAMELIB_ID and SHADER_ID ones).
+	@id=$$(strings -a $(EXE) 2>/dev/null | grep -E '^[0-9a-f]{16}$$' | grep -v '^0\+$$'); \
+	  gid=$$(strings -a $(GAMELIB) 2>/dev/null | grep -E '^[0-9a-f]{16}$$' | grep -v '^0\+$$' | head -1); \
+	  if [ -n "$$gid" ] && ! printf '%s\n' "$$id" | grep -q "^$$gid$$"; then \
+	    echo "apk: ERROR: the game code library's GAMELIB_ID ($$gid) is not in libmain.so ($$id): the game would refuse it at startup"; exit 1; fi
 @mkdir -p $(B)/lib/$(ABI) $(APK_O) $(dir $(1))
 cp $(SDL_DEPS) $(B)/lib/$(ABI)/
 rm -rf $(APK_O)/assets && mkdir -p $(APK_O)/assets/bonus && cp extras/pipelines.list $(APK_O)/assets/ && \

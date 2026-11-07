@@ -2,9 +2,11 @@
 #
 # This repo adds on-screen touch controls (runtime/touch.cpp, Xash3D-style: icons, hold buttons,
 # editable layouts, profiles) on top of upstream 0.15.1's Android build. The recompiled game code
-# (libmhgugame.so) is taken from the official 0.15.1 release APK: it was built from this same source
-# tree (the same GAMELIB_ID), and only the runtime (libmain.so) is rebuilt here. That keeps the build
-# free of any game dump while the game code stays byte-identical to the official release.
+# (libmhgugame.so) is taken from the official 0.15.1 release APK and PLACED BEFORE MAKE RUNS: the
+# Makefile then compiles the runtime (libmain.so) with the placed library's own GAMELIB_ID, which
+# the game checks at startup (runtime/gamelib.c), and android/apk.mk re-checks the pair before
+# packing. That keeps the build free of any game dump while the game code stays byte-identical to
+# the official release.
 #
 #   make PLATFORM=android ABI=arm64-v8a dist VERSION=<x.y.z>
 #
@@ -14,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (numbers and dots only, e.g. 0.16.0)'
+        description: 'Release version (numbers and dots only, e.g. 0.16.1)'
         required: true
-        default: '0.16.0'
+        default: '0.16.1'
       release:
         description: 'Publish a GitHub release with the APK'
         required: true
@@ -52,37 +54,24 @@ jobs:
           ls "$SDK"/cmake/* >/dev/null 2>&1 || "$SDK/cmdline-tools/latest/bin/sdkmanager" "cmake;3.31.1" >/dev/null
           echo "NDK: $(ls "$SDK"/ndk)  cmake: $(ls "$SDK"/cmake)  build-tools: $(ls "$SDK"/build-tools)  platforms: $(ls "$SDK"/platforms)"
 
-      - name: Take libmhgugame.so and the bonus save from the official 0.15.1 APK
+      - name: Take the official game code library and bonus save, and place them (make reads the placed GAMELIB_ID)
         run: |
           curl -fL --retry 3 -o /tmp/official.apk \
             https://github.com/morerokk/MHGURecomp/releases/download/0.15.1/Android-MHGURecomp.0.15.1.apk
-          mkdir -p /tmp/bonus
+          mkdir -p /tmp/bonus build-android/lib/arm64-v8a build-android/bonus
           unzip -o -j /tmp/official.apk 'lib/arm64-v8a/libmhgugame.so' -d /tmp/
           unzip -o -j /tmp/official.apk 'assets/bonus/system' -d /tmp/bonus/
-          ls -la /tmp/libmhgugame.so /tmp/bonus
-
-      - name: Match the official build's GAMELIB_ID (it was made on Windows, from CRLF checkouts)
-        run: |
-          # The runtime refuses a game library whose GAMELIB_ID differs. The official 0.15.1 release hashed
-          # these files with CRLF line endings (Windows git autocrlf): convert them the same way.
-          for f in tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
-                   runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h; do
-            sed -i 's/\r\?$/\r/' "$f"
-          done
-          GENFLAGS='-O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime  -fPIC'
-          GOT=$({ cat tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
-                    runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
-                  echo "$GENFLAGS"; } | sha256sum | cut -c1-16)
-          WANT=$(python3 - <<'EOF'
-          import re
-          d = open('/tmp/libmhgugame.so','rb').read()
-          c = set(m.group().decode() for m in re.finditer(rb'(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])', d))
-          assert len(c) == 1, f'expected exactly one candidate GAMELIB_ID, got {c}'
-          print(c.pop())
-          EOF
-          )
-          echo "GAMELIB_ID: computed=$GOT official=$WANT"
-          [ "$GOT" = "$WANT" ] || { echo "GAMELIB_ID mismatch: the rebuilt runtime would refuse this game library"; exit 1; }
+          cp /tmp/libmhgugame.so build-android/lib/arm64-v8a/libmhgugame.so
+          cp /tmp/bonus/system build-android/bonus/system
+          # A timestamp in the future, so make packs this file instead of relinking it from a dump we
+          # don't have (dist builds the game library's objects, which would then be newer than a plain
+          # touch could keep ahead of).
+          touch -d "2099-01-01 00:00 UTC" build-android/lib/arm64-v8a/libmhgugame.so
+          # The Makefile compiles the runtime with the placed library's own GAMELIB_ID (the game refuses
+          # another one at startup), so this step must run before the build. Show the id for the log.
+          ID=$(strings -a build-android/lib/arm64-v8a/libmhgugame.so | grep -E '^[0-9a-f]{16}$' | grep -v '^0\+$' | head -1)
+          [ -n "$ID" ] || { echo "could not read the placed library's GAMELIB_ID"; exit 1; }
+          echo "placed libmhgugame.so, GAMELIB_ID: $ID"
 
       - name: Record the generated-code id (dist wants one; no game dump is compiled here)
         run: |
@@ -124,16 +113,6 @@ jobs:
         run: |
           make -j"$(nproc)" PLATFORM=android ABI=arm64-v8a build-android/lib/arm64-v8a/libmain.so
 
-      - name: Place the official game code library (the runtime's own make would want to rebuild it)
-        run: |
-          mkdir -p build-android/lib/arm64-v8a build-android/bonus
-          cp /tmp/libmhgugame.so build-android/lib/arm64-v8a/libmhgugame.so
-          cp /tmp/bonus/system build-android/bonus/system
-          # A timestamp in the future, so make packs this file instead of relinking it from a dump we
-          # don't have (dist builds the game library's objects, which would then be newer than a plain
-          # touch could keep ahead of).
-          touch -d "2099-01-01 00:00 UTC" build-android/lib/arm64-v8a/libmhgugame.so
-
       - name: Pack and sign the APK
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
@@ -159,7 +138,17 @@ jobs:
           missing = sorted(n for n in needed - exported if n not in system)
           print(f'game lib imports: {len(needed)}, libmain exports: {len(exported)}')
           assert not missing, f'missing from libmain.so: {missing}'
-          print('ABI check OK')
+
+          import re
+          def ids(path):
+              d = open(path, 'rb').read()
+              return set(m.group().decode() for m in re.finditer(rb'(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])', d)
+                         if not set(m.group()) <= set(b'0'))
+          gid = ids('build-android/lib/arm64-v8a/libmhgugame.so')
+          assert len(gid) == 1, f'expected exactly one candidate GAMELIB_ID in the game library, got {gid}'
+          assert gid <= ids('build-android/lib/arm64-v8a/libmain.so'), \
+              f'libmain.so was not compiled with the game library\'s GAMELIB_ID {gid}: the game would refuse it at startup'
+          print(f'ABI check OK (GAMELIB_ID {next(iter(gid))} matches)')
           EOF
 
       - name: Collect the build's files
@@ -202,7 +191,7 @@ jobs:
             - **Touch controls**: buttons for A B X Y, L / R / ZL / ZR, + / -, a d-pad, two floating stick zones (move and camera), a menu button and a profile switcher - multi-touch, with a haptic tick on presses.
             - **Edit mode**: Settings > Android > "Edit touch layout" closes the menu and lets a finger move any control; the toolbar adds, sizes and deletes. Saved per profile in `touch.txt` beside the settings.
             - **Profiles**: one layout per weapon if you like - "New profile" copies the current one, the on-screen ⇄ button (or the settings) switches between them mid-hunt.
-            - **Custom resolution scale**: Settings > Display > "Resolution scale (%)" renders the 3D picture at any percent (40-150); menus and HUD stay sharp.
+            - **Custom resolution scale**: Settings > Display > "Resolution scale (%)" renders the 3D picture at any percent (40-150, 0 = the screen's own size); menus and HUD stay sharp.
             - **Save import / export**: Settings > Android > Save data (already upstream: copies the save to any folder and back).
             - The game code library is byte-identical to the official 0.15.1 release; only the runtime was rebuilt.
 

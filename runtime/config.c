@@ -554,7 +554,7 @@ static bool parse_aspect(const char *v, float *out) {
 #define ERR_HP "HP factors must be 0.05-20."
 #define ERR_VILLAGE "Invalid village HP or quest override count."
 #define ERR_CONFIRM "Invalid menu confirmation policy."
-#define ERR_SCALE "Invalid interface scale."
+#define ERR_SCALE "Resolution scale must be Auto or 40-150."
 #define ERR_ICONS "Invalid button icon layout."
 #define ERR_LANGUAGE "Invalid menu language."
 #define ERR_UPDATES "Invalid update setting."
@@ -569,7 +569,7 @@ const ConfigSetting g_settings[] = {
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
     {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
     {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
-    {"Display", "ResolutionScale", SET_INT, F(render_scale), 0, 40, 150, NULL, NULL, false, ERR_SCALE},
+    {"Display", "ResolutionScale", SET_INT, F(render_scale), 0, 0, 150, NULL, NULL, false, ERR_SCALE},
     {"Display", "ScreenFit", SET_CHOICE, F(screen_fit), 0, 0, 0, "Letterbox,Fill,Stretch", NULL, false, ERR_MISC},
     {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
     {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
