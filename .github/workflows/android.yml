@@ -11,6 +11,9 @@
 name: Build Android APK
 
 on:
+  push:
+    branches: [ciboot]
+    paths: ['.github/workflows/.boot']
   workflow_dispatch:
     inputs:
       version:
