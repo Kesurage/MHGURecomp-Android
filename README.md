@@ -25,8 +25,18 @@
   <a href="#building-from-source">Build from source</a>
 </p>
 
+# MHGU Recomp (Android touch build)
+
+> **This repo builds the Android APK with an Xash3D-style touch control layer for phones** (made on an Infinix Hot 50 4G, Helio G100 / Mali-G57 MC2), on top of upstream 0.15.1's Android support.
+> - **Get it**: the [releases](https://github.com/Kesurage/MHGURecomp-Android/releases) page has the signed APK.
+> - **Controls**: coloured face buttons, bumpers, a d-pad, two floating sticks, hold buttons (**Run** = B held, **Aim** = ZR held) that a tap keeps pressed - everything movable, sizeable, addable and deletable in per-weapon profiles (Settings > Android > Edit touch layout).
+> - **Comforts**: idle fade of the controls, FPS counter and battery in the corner, Screen fit (Letterbox / Fill / Stretch) for 20:9 phones, resolution scale, save import/export - all in the settings menu (the ≡ button on screen).
+> - **Building**: `make PLATFORM=android ABI=arm64-v8a dist VERSION=x.y.z` (the CI workflow does the full APK), or read upstream's instructions below. The game code library comes from the official 0.15.1 release; only the runtime is rebuilt.
+> - **Phone defaults**: the auto 3D resolution caps at 720p on Android, where a 1080p 3D picture drowns a Mali-G57.
+
 # MHGU Recomp
 
+A native PC port of **Monster Hunter Generations Ultimate** (Nintendo Switch, version 1.4.0), made by statically
 A native PC port of **Monster Hunter Generations Ultimate** (Nintendo Switch, version 1.4.0), made by statically
 recompiling the game's 32-bit ARM code to C and running it on a host runtime. Switch system services and the NVN
 graphics API are reimplemented on Windows, Linux and Android, with Vulkan for rendering.
