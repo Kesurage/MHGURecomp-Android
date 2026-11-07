@@ -61,6 +61,12 @@ static SDL_AtomicInt live_bonus;
 // [Audio]
 static SDL_AtomicInt volume = {100};
 static SDL_AtomicInt mute_in_background;
+// [Android] the on-screen controls (runtime/touch.cpp)
+static SDL_AtomicInt live_touch = {1};
+static SDL_AtomicInt live_touch_opacity;
+static SDL_AtomicInt live_touch_scale;
+static SDL_AtomicInt live_touch_sensitivity;
+static SDL_AtomicInt live_touch_haptics = {1};
 // [Application]
 static SDL_AtomicInt confirm_exit = {1};
 static SDL_AtomicInt language = {0};
@@ -117,6 +123,11 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->ldn_port != saved.ldn_port) SDL_SetAtomicInt(&live_ldn_port, c->ldn_port);
     if (all || c->sync_small_monsters != saved.sync_small_monsters) SDL_SetAtomicInt(&live_sync_zako, c->sync_small_monsters);
     if (all || c->bonus_content != saved.bonus_content) SDL_SetAtomicInt(&live_bonus, c->bonus_content);
+    if (all || c->touch != saved.touch) SDL_SetAtomicInt(&live_touch, c->touch);
+    if (all || c->touch_opacity != saved.touch_opacity) set_float(&live_touch_opacity, c->touch_opacity);
+    if (all || c->touch_scale != saved.touch_scale) set_float(&live_touch_scale, c->touch_scale);
+    if (all || c->touch_sensitivity != saved.touch_sensitivity) set_float(&live_touch_sensitivity, c->touch_sensitivity);
+    if (all || c->touch_haptics != saved.touch_haptics) SDL_SetAtomicInt(&live_touch_haptics, c->touch_haptics);
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);
@@ -160,6 +171,11 @@ int config_live_village_in_hub(void) { return SDL_GetAtomicInt(&live_village); }
 int config_live_ldn_port(void) { return SDL_GetAtomicInt(&live_ldn_port); }
 int config_live_sync_small_monsters(void) { return SDL_GetAtomicInt(&live_sync_zako); }
 int config_live_bonus_content(void) { return SDL_GetAtomicInt(&live_bonus); }
+bool config_live_touch_enabled(void) { return SDL_GetAtomicInt(&live_touch) != 0; }
+float config_live_touch_opacity(void) { return get_float(&live_touch_opacity); }
+float config_live_touch_scale(void) { return get_float(&live_touch_scale); }
+float config_live_touch_sensitivity(void) { return get_float(&live_touch_sensitivity); }
+bool config_live_touch_haptics(void) { return SDL_GetAtomicInt(&live_touch_haptics) != 0; }
 void config_live_ldn_join(char *join, size_t size) {
     SDL_LockSpinlock(&live_ldn_lock);
     SDL_strlcpy(join, live_ldn_join, size);

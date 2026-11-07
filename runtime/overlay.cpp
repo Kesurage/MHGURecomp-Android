@@ -38,6 +38,7 @@ static void ImGui_ImplVulkan_UpdateTexture(ImTextureData *) {}
 #include "hle/chat.h"
 #include "settings_locale.h"
 #include "settings_panel.h"
+#include "touch.h"
 
 extern "C" volatile uint64_t g_present_count;  // (runtime/rt.h: frames the game presented)
 
@@ -191,7 +192,9 @@ bool overlay_event(const SDL_Event *e) {
         set_open(!g_forge_open);
         return true;
     }
-    if (!g_open) return false;
+    // (the edit mode of the touch controls has the mouse too: its toolbar is ImGui's, and the settings
+    // menu is closed then — runtime/touch.cpp)
+    if (!g_open && !touch_editing()) return false;
     SDL_Window *w = ui_window();
     float density = w ? SDL_GetWindowPixelDensity(w) : 1.0f;  // (ImGui works in the image's pixels)
     Ev v = {};
@@ -719,7 +722,7 @@ void overlay_frame(void *cpu) {
     bool fps = config_show_fps();
 #endif
     float loading = loading_alpha(now);
-    if (!open && !free_render && !notice && !chat && !fps && !loading) {  // (nothing to draw)
+    if (!open && !free_render && !notice && !chat && !fps && !loading && !touch_draws()) {  // (nothing to draw)
         std::lock_guard<std::mutex> l(g_snap_lock);
         if (g_snap.Valid) snap_clear();
         apply_input(io);  // (keep the queue short)
@@ -742,6 +745,11 @@ void overlay_frame(void *cpu) {
     bool forge_idle = g_forge_open && g.ActiveId == 0 && g.OpenPopupStack.Size == 0 && g.NavWindow &&
                       g.NavWindow == g.NavWindow->RootWindow && !strcmp(g.NavWindow->Name, "forge");
     bool under = g_forge_over;  // (the settings wait under Forge's menu: neither drawn nor given input)
+    if (touch_take_edit_request()) {  // ("Edit touch layout": the menu goes, the edit mode comes)
+        g_settings_open = false;
+        set_open(g_forge_open);
+        touch_set_editing(true);
+    }
     if (!under) settings_panel_before_frame(g_settings_open);
     ImGui::NewFrame();
     if (!under) {
@@ -789,6 +797,7 @@ void overlay_frame(void *cpu) {
     if (chat) draw_chat(line, now, scale);
     if (fps) draw_fps(now);
     if (loading) draw_loading(now, scale, loading);
+    touch_draw(scale);
     ImGui::Render();
 
     ImDrawData *dd = ImGui::GetDrawData();

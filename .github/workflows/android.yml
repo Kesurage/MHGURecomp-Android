@@ -1,0 +1,206 @@
+# Build the Android APK (arm64-v8a) and publish it as a release.
+#
+# This fork adds on-screen touch controls (runtime/touch.cpp) on top of upstream 0.15.1's Android
+# build. The recompiled game code (libmhgugame.so) is taken from the official 0.15.1 release APK: it
+# was built from this same source tree (the same GAMELIB_ID), and only the runtime (libmain.so) is
+# rebuilt here. That keeps the build free of any game dump while the game code stays byte-identical
+# to the official release.
+#
+#   make PLATFORM=android ABI=arm64-v8a dist VERSION=<x.y.z>
+#
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (numbers and dots only, e.g. 0.16.0)'
+        required: true
+        default: '0.16.0'
+      release:
+        description: 'Publish a GitHub release with the APK'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history: the version code is the commit count
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install the Android SDK bits (NDK, cmake; build-tools 35 + platform 35, pinned)
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          # build-tools 35 + platform 35, pinned: the manifest must be linked with the same toolchain
+          # as the official release. Newer canary tools (build-tools 37) encode targetSdkVersion as the
+          # pre-release string "37.2", which every stable Android refuses to parse ("There was a problem
+          # parsing the package").
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null
+          ls "$SDK"/ndk/* >/dev/null 2>&1 || "$SDK/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" >/dev/null
+          ls "$SDK"/cmake/* >/dev/null 2>&1 || "$SDK/cmdline-tools/latest/bin/sdkmanager" "cmake;3.31.1" >/dev/null
+          echo "NDK: $(ls "$SDK"/ndk)  cmake: $(ls "$SDK"/cmake)  build-tools: $(ls "$SDK"/build-tools)  platforms: $(ls "$SDK"/platforms)"
+
+      - name: Take libmhgugame.so and the bonus save from the official 0.15.1 APK
+        run: |
+          curl -fL --retry 3 -o /tmp/official.apk \
+            https://github.com/morerokk/MHGURecomp/releases/download/0.15.1/Android-MHGURecomp.0.15.1.apk
+          mkdir -p /tmp/bonus
+          unzip -o -j /tmp/official.apk 'lib/arm64-v8a/libmhgugame.so' -d /tmp/
+          unzip -o -j /tmp/official.apk 'assets/bonus/system' -d /tmp/bonus/
+          ls -la /tmp/libmhgugame.so /tmp/bonus
+
+      - name: Match the official build's GAMELIB_ID (it was made on Windows, from CRLF checkouts)
+        run: |
+          # The runtime refuses a game library whose GAMELIB_ID differs. The official 0.15.1 release hashed
+          # these files with CRLF line endings (Windows git autocrlf): convert them the same way.
+          for f in tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
+                   runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h; do
+            sed -i 's/\r\?$/\r/' "$f"
+          done
+          GENFLAGS='-O1 -fno-strict-aliasing -ffp-contract=off -fno-math-errno -Wno-return-type -Wno-unused-label -Wno-parentheses-equality -Wno-unused-value -fvisibility=hidden -Iruntime  -fPIC'
+          GOT=$({ cat tools/gen.py tools/lifter.py tools/neon.py tools/nso.py tools/gamelib_entry.c \
+                    runtime/hle/hle_symbols.txt runtime/cpu.h runtime/vfp.h runtime/neon_rt.h runtime/gamelib.h
+                  echo "$GENFLAGS"; } | sha256sum | cut -c1-16)
+          WANT=$(python3 - <<'EOF'
+          import re
+          d = open('/tmp/libmhgugame.so','rb').read()
+          c = set(m.group().decode() for m in re.finditer(rb'(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])', d))
+          assert len(c) == 1, f'expected exactly one candidate GAMELIB_ID, got {c}'
+          print(c.pop())
+          EOF
+          )
+          echo "GAMELIB_ID: computed=$GOT official=$WANT"
+          [ "$GOT" = "$WANT" ] || { echo "GAMELIB_ID mismatch: the rebuilt runtime would refuse this game library"; exit 1; }
+
+      - name: Record the generated-code id (dist wants one; no game dump is compiled here)
+        run: |
+          mkdir -p generated
+          cat tools/gen.py tools/lifter.py tools/neon.py tools/nso.py runtime/hle/hle_symbols.txt \
+            | tr -d '\r' | sha256sum | cut -c1-16 > generated/gen.id
+          echo "GEN_ID: $(cat generated/gen.id)"
+
+      - name: Pre-fetch the FFmpeg source (ffmpeg.org resets connections now and then)
+        run: |
+          mkdir -p third_party/ffmpeg
+          ok=0
+          for i in 1 2 3 4 5; do
+            curl -4 -fL --retry 3 --retry-all-errors --connect-timeout 20 \
+              -o third_party/ffmpeg/ffmpeg-9.0.2.tar.xz.part \
+              https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz && ok=1 && break || sleep 15
+          done
+          [ "$ok" = 1 ] || { echo "ffmpeg.org is unreachable"; exit 1; }
+          mv third_party/ffmpeg/ffmpeg-9.0.2.tar.xz.part third_party/ffmpeg/ffmpeg-9.0.2.tar.xz
+          echo "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  third_party/ffmpeg/ffmpeg-9.0.2.tar.xz" | sha256sum -c -
+
+      - name: Restore the fork's signing key from repo secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          # Every release must be signed with the SAME key, or Android refuses the new APK as an
+          # update over the previous one. The key lives in the repo secrets ANDROID_KEYSTORE_B64 /
+          # ANDROID_KEYSTORE_PASSWORD (Settings > Secrets and variables > Actions), which only admins
+          # can read - and it must never land in the artifacts of this public repo.
+          [ -n "$KEYSTORE_B64" ] || { echo "secret ANDROID_KEYSTORE_B64 is missing"; exit 1; }
+          [ -n "$KEYSTORE_PASS" ] || { echo "secret ANDROID_KEYSTORE_PASSWORD is missing"; exit 1; }
+          mkdir -p "$HOME/.android"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$HOME/.android/mhgurecomp-fork.keystore"
+          printf '%s' "$KEYSTORE_PASS" > "$HOME/.android/mhgurecomp-fork.keystore.pass"
+          echo "key restored: $(ls -la "$HOME/.android/mhgurecomp-fork.keystore")"
+
+      - name: Build the runtime (SDL3, shaderc, FFmpeg, libmain.so with the touch controls)
+        run: |
+          make -j"$(nproc)" PLATFORM=android ABI=arm64-v8a build-android/lib/arm64-v8a/libmain.so
+
+      - name: Place the official game code library (the runtime's own make would want to rebuild it)
+        run: |
+          mkdir -p build-android/lib/arm64-v8a build-android/bonus
+          cp /tmp/libmhgugame.so build-android/lib/arm64-v8a/libmhgugame.so
+          cp /tmp/bonus/system build-android/bonus/system
+          # newer than every object, so dist packs it instead of rebuilding it from a dump we don't have
+          touch build-android/lib/arm64-v8a/libmhgugame.so
+
+      - name: Pack and sign the APK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          # Pin build-tools 35 / platform 35 (see the install step above): targetSdkVersion must land in
+          # the manifest as a plain integer, as it does in the official release.
+          make -j"$(nproc)" PLATFORM=android ABI=arm64-v8a dist VERSION="${{ inputs.version }}" \
+            BUILD_TOOLS="$SDK/build-tools/35.0.0" ANDROID_JAR="$SDK/platforms/android-35/android.jar" TARGET_API=35 \
+            RELEASE_KEY="$HOME/.android/mhgurecomp-fork.keystore"
+
+      - name: Check the rebuilt libmain.so still satisfies the game code library's imports
+        run: |
+          pip install -q pyelftools
+          python3 - <<'EOF'
+          from elftools.elf.elffile import ELFFile
+          game = ELFFile(open('build-android/lib/arm64-v8a/libmhgugame.so', 'rb'))
+          main = ELFFile(open('build-android/lib/arm64-v8a/libmain.so', 'rb'))
+          needed = {s.name for s in game.get_section_by_name('.dynsym').iter_symbols()
+                    if s['st_shndx'] == 'SHN_UNDEF' and s.name}
+          exported = {s.name for s in main.get_section_by_name('.dynsym').iter_symbols()
+                      if s.name and s['st_shndx'] != 'SHN_UNDEF'}
+          system = {'__cxa_atexit', '__cxa_finalize', '__register_atfork', '__system_property_get',
+                    'getauxval', 'memfd_create', 'strncmp'}  # libc / libdl
+          missing = sorted(n for n in needed - exported if n not in system)
+          print(f'game lib imports: {len(needed)}, libmain exports: {len(exported)}')
+          assert not missing, f'missing from libmain.so: {missing}'
+          print('ABI check OK')
+          EOF
+
+      - name: Collect the build's files
+        run: |
+          mkdir -p stage
+          cp dist/Android-MHGURecomp.*.apk stage/ 2>/dev/null || cp build-android/mhgurecomp.apk stage/
+          # (the signing key must NOT land in the artifacts: this repo is public, so its artifacts are
+          # downloadable by anyone. The key lives in the repo's Actions secrets, admin-only.)
+          # the unstripped runtime library, for symbol crash backtraces later
+          cp build-android/lib/arm64-v8a/libmain.so stage/libmain.unstripped.so
+          ls -la stage
+          sha256sum stage/*.apk
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MHGURecomp-android-${{ inputs.version }}
+          path: stage/
+
+      - name: Publish the release
+        if: ${{ inputs.release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: ${{ inputs.version }} - Touch controls (Infinix Hot 50 4G and every Mali phone)
+          prerelease: false
+          make_latest: true
+          files: stage/Android-MHGURecomp.*.apk
+          body: |
+            Upstream 0.15.1 (which already carries the Mali fixes) plus **on-screen touch controls**, built for the Infinix Hot 50 4G (Helio G100, Mali-G57 MC2) and every phone.
+
+            ## New in this fork
+            - **Touch controls**: buttons for A B X Y, L / R / ZL / ZR, + / -, a d-pad, two floating stick zones (move and camera), a menu button and a profile switcher - all drawn over the game, multi-touch, with a haptic tick on presses.
+            - **Edit mode**: Settings > Android > "Edit touch layout" closes the menu and lets a finger move any control; the toolbar adds, sizes and deletes. Saved per profile in `touch.txt` beside the settings.
+            - **Profiles**: one layout per weapon if you like - "New profile" copies the current one, the on-screen ⇄ button (or the settings) switches between them mid-hunt.
+            - **Custom resolution scale**: Settings > Display > "Resolution scale (%)" renders the 3D picture at any percent of the screen (40-150); menus and HUD stay sharp.
+            - **Fullscreen, no stretch**: the picture fills the screen in its own shape (adaptive, HUD anchored) or letterboxes 16:9 - it never stretches.
+            - **Save import / export**: Settings > Android > Save data (already upstream: copies the save to any folder and back).
+            - The game code library is byte-identical to the official 0.15.1 release; only the runtime was rebuilt.
+
+            ## Install
+            - The APK is signed (v2+v3) with this fork's key: **if the official app or an older build of this fork is on the phone, uninstall it first** (back up `Android/data/io.github.morerokk.mhgurecomp` - your saves are in `files/save`), then install this APK and copy the folder back. After that, updates from this fork install over each other normally.
+
+            ## Recommended settings (Mali-G57 / Helio G100)
+            - Renderer: 100% (or "Resolution scale" 70-85% if a scene stutters), FPS cap 30, raise to 60 when stable
+            - MSAA: off (1x) - Mali pays for it dearly

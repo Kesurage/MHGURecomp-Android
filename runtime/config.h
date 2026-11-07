@@ -73,6 +73,12 @@ typedef struct {
     int fsr_objmotion;        // FSR: motion vectors of moving objects (characters, monsters): 1 on, 0 camera only
     float fsr_reactive;       // FSR: reactive mask strength on the game's moving-object mask, 0 (off) .. 1
     int fsr_animsurf;         // FSR: surfaces animated through their texture (banners, water): 1 detected, 0 off
+    int touch;                // [Android] TouchControls: the on-screen controls (runtime/touch.cpp)
+    float touch_opacity;      // how strongly they draw, 0.2..1
+    float touch_scale;        // their size, times the layout's
+    float touch_sensitivity;  // the on-screen sticks' tilt multiplier, 0.2..2
+    int touch_haptics;        // a short tick of the vibrator when a control takes a finger
+    int render_scale;         // [Display] ResolutionScale: the 3D picture at this percent of the screen (0: Auto)
     int updates;              // [Application] Updates: UPDATES_*, read by the updater (updater/updater.c), not the game
     int shader_prewarm;       // [Performance] ShaderPrewarm: translate the game's shaders at start-up (nvn/vulkan/exec.c)
     int loading_indicator;    // [Performance] LoadingIndicator: the start-up's "Loading" corner (overlay.cpp); ini only
@@ -195,7 +201,13 @@ int config_live_village_in_hub(void);   // [Village Quests] VillageQuestsInHub (
 int config_live_ldn_port(void);         // [Multiplayer] Port: the next hub hosted and the next search (net/ldn.c)
 void config_live_ldn_join(char *join, size_t size);  // [Multiplayer] Join: the next search (net/ldn.c)
 int config_live_sync_small_monsters(void);  // [Multiplayer] SyncSmallMonsters (net/emsync.c)
-int config_live_bonus_content(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
+int config_live_bonus_content(void);
+// [Android] the on-screen controls (runtime/touch.cpp)
+bool config_live_touch_enabled(void);
+float config_live_touch_opacity(void);
+float config_live_touch_scale(void);
+float config_live_touch_sensitivity(void);
+bool config_live_touch_haptics(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
 int config_live_share_urgent(void);    // [Multiplayer] ShareUrgentCredit

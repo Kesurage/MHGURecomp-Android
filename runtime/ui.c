@@ -231,6 +231,11 @@ static void set_window_icon(void) {}
 #endif
 
 void ui_init(void) {
+#ifdef __ANDROID__
+    // A finger is the pointer too, so the menus work on a phone (the touch controls take their own
+    // finger events first, runtime/touch.cpp; the game ignores a synthesized click, host_input.c).
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO)) FATAL("SDL_Init: %s\n", SDL_GetError());
     int sdl = SDL_GetVersion();
 #ifdef MHGU_SDL_BUNDLED

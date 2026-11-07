@@ -2,6 +2,7 @@
 #include "config.h"
 #include "menu_confirm.h"
 #include "settings_locale.h"
+#include "touch.h"
 #include "settings_icons.h"
 #include "app_actions.h"
 #include "cheats.h"
@@ -292,6 +293,12 @@ bool equal(const Config &a, const Config &b) {
     SAME(share_urgent);
     SAME(mouse_sensitivity);
     SAME(aspect_ratio);
+    SAME(render_scale);
+    SAME(touch);
+    SAME(touch_opacity);
+    SAME(touch_scale);
+    SAME(touch_sensitivity);
+    SAME(touch_haptics);
     SAME(fov);
     SAME(ui_anchor);
     SAME(background_input);
@@ -1060,6 +1067,10 @@ std::vector<Row> main_rows() {
             number(r, "render.width", "Width", &c.render_w, 320, 16384, 80, ini("RenderResolution"));
             number(r, "render.height", "Height", &c.render_h, 180, 16384, 45, ini("RenderResolution"));
         }
+        number(r, "render.scale", "Resolution scale (%)", &c.render_scale, (int)lo("ResolutionScale"),
+               (int)hi("ResolutionScale"), 5, ini("ResolutionScale"));
+        r.back().help = tr("Renders the 3D picture at this percent of the screen's size (0 = Auto, the screen's own), "
+                           "for a steadier frame rate on a slower GPU. The menus and the HUD stay at full size.");
         add_choice(
             r, "aspect.auto", "Automatic aspect ratio", c.aspect_ratio == 0 ? 0 : 1,
             {tr("Auto"), tr("Custom")}, [](int v) { s.draft.aspect_ratio = v ? 16.f / 9 : 0; }, ini("AspectRatio"));
@@ -1301,6 +1312,38 @@ std::vector<Row> main_rows() {
         break;
 #ifdef __ANDROID__
     case ANDROID_PAGE:  // (Android/data can't be written by the player's file managers: the app copies files in and out)
+        header(r, "touch.header", tr("Touch controls"));
+        add_bool(r, "touch", "On-screen controls", &c.touch, ini("TouchControls"));
+        r.back().help = tr("Buttons and two stick zones over the game, for playing without a controller. Every control "
+                           "can be moved, sized, added and deleted, in profiles of their own (one per weapon, say). The "
+                           "\xE2\x89\xA1 button opens this menu, \xE2\x87\x84 switches the profile.");
+        number(r, "touch.opacity", tr("Opacity"), &c.touch_opacity, lo("TouchOpacity"), hi("TouchOpacity"), 0.05f,
+               ini("TouchOpacity"));
+        number(r, "touch.scale", tr("Button size"), &c.touch_scale, lo("TouchScale"), hi("TouchScale"), 0.05f,
+               ini("TouchScale"));
+        number(r, "touch.sens", tr("Stick sensitivity"), &c.touch_sensitivity, lo("TouchSensitivity"),
+               hi("TouchSensitivity"), 0.05f, ini("TouchSensitivity"));
+        r.back().help = tr("How far a finger's drag moves the stick zones' tilt.");
+        add_bool(r, "touch.haptics", tr("Vibrate on a press"), &c.touch_haptics, ini("TouchHaptics"));
+        action(r, "touch.edit", tr("Edit touch layout"), []() { touch_request_edit(); });
+        r.back().help = tr("Closes this menu and lets a finger move the controls: drag one to move it, the toolbar adds, "
+                           "sizes and deletes, Done saves. The layout is kept per profile in touch.txt beside the settings.");
+        action(r, "touch.profile.add", tr("New profile (a copy of this one)"), []() {
+            keyboard(tr("Profile name"), touch_profile_name(touch_profile_current()), 31,
+                     [](const std::string &in, std::string &error) {
+                         std::string name = in;
+                         while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.pop_back();
+                         if (name.empty()) { error = tr("Give the profile a name."); return false; }
+                         for (int i = 0; i < touch_profile_count(); i++)
+                             if (i != touch_profile_current() && name == touch_profile_name(i)) {
+                                 error = tr("There is a profile with that name already.");
+                                 return false;
+                             }
+                         touch_profile_add(name.c_str());
+                         return true;
+                     });
+        });
+        r.back().help = tr("Another layout to switch to with the \xE2\x87\x84 control \xE2\x80\x94 for another weapon, say. It starts as a copy of this one; edit it with Edit touch layout.");
         header(r, "save.header", tr("Save data"));
         text(r, "save.folder", "Save folder", c.save_dir, sizeof c.save_dir, *c.save_dir ? c.save_dir : tr("App folder (default)"),
              ini("SaveFolder"));

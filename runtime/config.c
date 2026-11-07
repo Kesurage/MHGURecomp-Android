@@ -32,6 +32,7 @@
     .height = 1080,                                                                                 \
     .render_w = 0,                                                                                  \
     .render_h = 0,                                                                                  \
+    .render_scale = 0,                                                                              \
     .aspect_ratio = 0.0f,                                                                           \
     .fov = 1.0f,                                                                                    \
     .ui_anchor = UI_CENTER,                                                                         \
@@ -85,6 +86,12 @@
     /* [Audio] */                                                                                   \
     .volume = 100,                                                                                  \
     .mute_in_background = 0,                                                                        \
+    /* [Android] */                                                                                 \
+    .touch = 1,                                                                                     \
+    .touch_opacity = 0.6f,                                                                          \
+    .touch_scale = 1.0f,                                                                            \
+    .touch_sensitivity = 1.0f,                                                                      \
+    .touch_haptics = 1,                                                                             \
     /* [Application] */                                                                             \
     .confirm_exit = 1,                                                                              \
     .language = 0,                                                                                  \
@@ -553,6 +560,7 @@ const ConfigSetting g_settings[] = {
      "Windowed|window,Fullscreen|exclusive|exclusivefullscreen,Borderless|borderless*", NULL, true, ERR_SIZE},
     {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
     {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
+    {"Display", "ResolutionScale", SET_INT, F(render_scale), 0, 40, 150, NULL, NULL, false, ERR_SCALE},
     {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
     {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
@@ -626,6 +634,11 @@ const ConfigSetting g_settings[] = {
     {"Application", "MenuScale", SET_INT, F(menu_scale), 0, 50, 200, NULL, NULL, false, ERR_SCALE},
     {"Application", "Updates", SET_CHOICE, F(updates), 0, 0, 0, "Ask,Auto|automatic,Off|never", NULL, false, ERR_UPDATES},
     {"Application", "SaveLocation", SET_TEXT, F(save_location), sizeof g_config.save_location, 0, 0, NULL, NULL, true, ERR_FOLDER},
+    ON_OFF("Android", "TouchControls", touch, false),
+    {"Android", "TouchOpacity", SET_FLOAT, F(touch_opacity), 0, 0.2f, 1.0f, NULL, NULL, false, ERR_VIEW},
+    {"Android", "TouchScale", SET_FLOAT, F(touch_scale), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
+    {"Android", "TouchSensitivity", SET_FLOAT, F(touch_sensitivity), 0, 0.2f, 2.0f, NULL, NULL, false, ERR_VIEW},
+    ON_OFF("Android", "TouchHaptics", touch_haptics, false),
 };
 #undef ON_OFF
 #undef KEYS
@@ -1092,6 +1105,11 @@ void config_load(void) {
         if (w != g_config.render_w || h != g_config.render_h)
             LOG("[config] RenderResolution %dx%d is not the picture's shape (%.3f): using %dx%d\n", g_config.render_w,
                 g_config.render_h, aspect, w, h);
+    }
+    if (g_config.render_scale > 0 && render_auto) {
+        fit_aspect((int)(w * g_config.render_scale / 100.0f + 0.5f), (int)(h * g_config.render_scale / 100.0f + 0.5f),
+                   aspect, &w, &h);
+        LOG("[config] resolution scale %d%%: 3D %dx%d\n", g_config.render_scale, w, h);
     }
     if (g_config.fsr) {  // FSR: that size is its output; the game renders smaller (runtime/nvn/vulkan/fsr.c)
         static const float ratio[] = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};

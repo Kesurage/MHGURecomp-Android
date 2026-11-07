@@ -35,6 +35,7 @@
 #include "overlay.h"
 #include "rt.h"
 #include "textinput.h"
+#include "touch.h"
 
 #define B(x) (1ull << (x))
 
@@ -551,6 +552,7 @@ static bool chat_mouse(const SDL_Event *e) {
 void host_input_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) pad_pressed(e->gbutton.which);
     if (overlay_event(e)) return;  // (Forge's menu open: keyboard and mouse are its)
+    if (touch_event(e)) return;    // (the on-screen controls: what a finger took is theirs)
     if (chat_mouse(e)) return;  // (typing a line of chat: the mouse drags its box)
     if (textinput_event(e)) return;  // (typing into a text entry: not controller buttons)
     switch (e->type) {
@@ -604,6 +606,9 @@ void host_input_event(const SDL_Event *e) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
         int btn = e->button.button;
         if (btn < 1 || btn > SDL_BUTTON_X2) break;
+#ifdef SDL_TOUCH_MOUSEID
+        if (e->button.which == SDL_TOUCH_MOUSEID) break;  // (a touch the on-screen controls did not take: not a click)
+#endif
         if (!e->button.down) {
             mouse_held &= ~(1u << btn);
         } else if (!mouse_captured && !mouse_no_capture) {  // (the click that captures the mouse is not a button press)
@@ -749,6 +754,7 @@ void host_input_update(void) {
     if (kx && ky) k = k * 7071 / 10000;  // diagonals: same length as straight
     lx += kx * k, ly += ky * k;
     mouse_update(&rx, &ry);
+    touch_update(&b, &lx, &ly, &rx, &ry);  // (the on-screen controls, runtime/touch.cpp)
 
     if (pad) {
         static const struct { SDL_GamepadButton sdl; int btn; } pad_buttons[] = {
