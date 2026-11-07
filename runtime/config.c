@@ -92,6 +92,9 @@
     .touch_scale = 1.0f,                                                                            \
     .touch_sensitivity = 1.0f,                                                                      \
     .touch_haptics = 1,                                                                             \
+    .touch_fade = 1,                                                                                \
+    /* [Display] */                                                                                 \
+    .screen_fit = 0,                                                                                \
     /* [Application] */                                                                             \
     .confirm_exit = 1,                                                                              \
     .language = 0,                                                                                  \
@@ -125,6 +128,12 @@ static const char DEFAULT_INI[] =
     "; Higher = sharper (for supersampling)\n"
     "; Default: Auto\n"
     "RenderResolution = Auto\n"
+    "\n"
+    "; How the picture lands on a screen of another shape: Letterbox keeps it whole with bars, Fill covers\n"
+    "; the screen and crops a little, Stretch fills it exactly (it distorts)\n"
+    "; Letterbox, Fill, Stretch\n"
+    "; Default: Letterbox\n"
+    "ScreenFit = Letterbox\n"
     "\n"
     "; Set to 16:9 to preserve the game's native aspect ratio\n"
     "; Default: Auto\n"
@@ -561,6 +570,7 @@ const ConfigSetting g_settings[] = {
     {"Display", "Resolution", SET_SIZE, F(width), F(height), 0, 0, "Desktop|auto", NULL, true, ERR_SIZE},
     {"Display", "RenderResolution", SET_SIZE, F(render_w), F(render_h), 0, 0, "Auto", NULL, true, ERR_SIZE},
     {"Display", "ResolutionScale", SET_INT, F(render_scale), 0, 40, 150, NULL, NULL, false, ERR_SCALE},
+    {"Display", "ScreenFit", SET_CHOICE, F(screen_fit), 0, 0, 0, "Letterbox,Fill,Stretch", NULL, false, ERR_MISC},
     {"Display", "AspectRatio", SET_ASPECT, F(aspect_ratio), 0, 0.5f, 10.0f, NULL, NULL, true, ERR_ASPECT},
     {"Display", "FOV", SET_FLOAT, F(fov), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
     {"Display", "UIAnchor", SET_CHOICE, F(ui_anchor), 0, 0, 0, "Center|1|16:9,21:9|2,32:9|3,Edges", anchor_values, true,
@@ -639,6 +649,7 @@ const ConfigSetting g_settings[] = {
     {"Android", "TouchScale", SET_FLOAT, F(touch_scale), 0, 0.5f, 2.0f, NULL, NULL, false, ERR_VIEW},
     {"Android", "TouchSensitivity", SET_FLOAT, F(touch_sensitivity), 0, 0.2f, 2.0f, NULL, NULL, false, ERR_VIEW},
     ON_OFF("Android", "TouchHaptics", touch_haptics, false),
+    ON_OFF("Android", "TouchFade", touch_fade, false),
 };
 #undef ON_OFF
 #undef KEYS
@@ -1082,6 +1093,13 @@ void config_load(void) {
 
     int tw = g_config.width, th = g_config.height;  // (Borderless shows the image at the desktop size)
     if (g_config.display_mode == DISPLAY_BORDERLESS) tw = tw < desktop_w ? tw : desktop_w, th = th < desktop_h ? th : desktop_h;
+#ifdef __ANDROID__
+    // A phone's window is always the screen, landscape (the manifest locks it): Resolution says nothing there, and
+    // SDL can ask the display mode before the activity has turned (portrait). The picture takes the screen's shape,
+    // landscape ordered, so a 20:9 phone uses all of it (ScreenFit Letterbox narrows the picture again if wanted).
+    tw = desktop_w > desktop_h ? desktop_w : desktop_h;
+    th = desktop_w > desktop_h ? desktop_h : desktop_w;
+#endif
     // The picture's shape: the window's or AspectRatio's, at least 16:10. The game lays its HUD out for 16:9, which
     // still fits down to 16:10 (a little flatter, nvn/vulkan/exec.c), so a narrower window (4:3) shows 16:10 with bars.
     // Wider than 16:9 shows more to the sides, 16:9 to 16:10 more above and below (camera_fovy, gen.py PATCHES).
@@ -1111,6 +1129,15 @@ void config_load(void) {
                    aspect, &w, &h);
         LOG("[config] resolution scale %d%%: 3D %dx%d\n", g_config.render_scale, w, h);
     }
+#ifdef __ANDROID__
+    // A phone's GPU (Mali-G57 on the Infinix Hot 50 4G and friends) drowns at 1080p: the auto 3D picture stops at
+    // 720p there (the screen is 720p anyway on HD+ phones; a RenderResolution of your own still wins, and FSR's
+    // output size is untouched, only the game's own render under it is).
+    if (render_auto && !g_config.fsr && h > 720) {
+        w = (int)(w * 720.0f / h + 0.5f), h = 720;
+        LOG("[config] Auto 3D capped at 720p for the phone's GPU (RenderResolution or ResolutionScale changes it)\n");
+    }
+#endif
     if (g_config.fsr) {  // FSR: that size is its output; the game renders smaller (runtime/nvn/vulkan/fsr.c)
         static const float ratio[] = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
         static const char *const names[] = {"NativeAA", "Quality", "Balanced", "Performance", "UltraPerformance"};

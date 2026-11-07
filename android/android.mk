@@ -57,10 +57,11 @@ LIB_INC   := -I$(SDL3_DIR)/include -I$(SHADERC_DIR)/include -I$(ZSTD_DIR)/includ
 # configure checks the arm64 assembler without --target (so the NDK's clang fails it), and plain C decodes the game's
 # 960x540 movies easily.
 FFMPEG_CC    = $(LLVM)/clang
+HOST_CC     ?= $(shell command -v clang 2>/dev/null || command -v gcc 2>/dev/null || echo clang)
 FFMPEG_CONF += --enable-cross-compile --target-os=android --arch=$(if $(filter x86_64,$(ABI)),x86_64,aarch64) \
                --extra-cflags=--target=$(TRIPLE) --extra-ldflags=--target=$(TRIPLE) --cxx=$(LLVM)/clang++ \
                --ar=$(LLVM)/llvm-ar --nm=$(LLVM)/llvm-nm --ranlib=$(LLVM)/llvm-ranlib --strip=$(LLVM)/llvm-strip \
-               --host-cc=clang --enable-pic --disable-asm
+               --host-cc=$(HOST_CC) --enable-pic --disable-asm
 
 # libmain.so: SDL calls its SDL_main. (--exclude-libs: shaderc and FFmpeg stay inside, as on Linux; libc++ static.)
 # (--no-undefined: a function newer than Android $(API) fails here, not on the player's device when the game starts)

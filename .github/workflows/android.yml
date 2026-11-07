@@ -1,10 +1,10 @@
 # Build the Android APK (arm64-v8a) and publish it as a release.
 #
-# This fork adds on-screen touch controls (runtime/touch.cpp) on top of upstream 0.15.1's Android
-# build. The recompiled game code (libmhgugame.so) is taken from the official 0.15.1 release APK: it
-# was built from this same source tree (the same GAMELIB_ID), and only the runtime (libmain.so) is
-# rebuilt here. That keeps the build free of any game dump while the game code stays byte-identical
-# to the official release.
+# This repo adds on-screen touch controls (runtime/touch.cpp, Xash3D-style: icons, hold buttons,
+# editable layouts, profiles) on top of upstream 0.15.1's Android build. The recompiled game code
+# (libmhgugame.so) is taken from the official 0.15.1 release APK: it was built from this same source
+# tree (the same GAMELIB_ID), and only the runtime (libmain.so) is rebuilt here. That keeps the build
+# free of any game dump while the game code stays byte-identical to the official release.
 #
 #   make PLATFORM=android ABI=arm64-v8a dist VERSION=<x.y.z>
 #
@@ -104,7 +104,7 @@ jobs:
           mv third_party/ffmpeg/ffmpeg-9.0.2.tar.xz.part third_party/ffmpeg/ffmpeg-9.0.2.tar.xz
           echo "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  third_party/ffmpeg/ffmpeg-9.0.2.tar.xz" | sha256sum -c -
 
-      - name: Restore the fork's signing key from repo secrets
+      - name: Restore the repo's signing key from repo secrets
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -184,27 +184,37 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
-          name: ${{ inputs.version }} - Touch controls (Infinix Hot 50 4G and every Mali phone)
+          name: ${{ inputs.version }} - Touch controls for phones (Infinix Hot 50 4G and every Mali phone)
           prerelease: false
           make_latest: true
           files: stage/Android-MHGURecomp.*.apk
           body: |
-            Upstream 0.15.1 (which already carries the Mali fixes) plus **on-screen touch controls**, built for the Infinix Hot 50 4G (Helio G100, Mali-G57 MC2) and every phone.
+            Upstream 0.15.1 (which already carries the Mali fixes) plus a full **Xash3D-style touch control layer**, tuned for the Infinix Hot 50 4G (Helio G100, Mali-G57 MC2) and every phone.
 
-            ## New in this fork
-            - **Touch controls**: buttons for A B X Y, L / R / ZL / ZR, + / -, a d-pad, two floating stick zones (move and camera), a menu button and a profile switcher - all drawn over the game, multi-touch, with a haptic tick on presses.
+            ## What this version changes
+            - **Controls that read at a glance**: the face buttons have their pad colours (green A, red B, blue X, yellow Y), the shoulders are bumpers, the d-pad a cross, hold buttons are amber squares - no more anonymous grey circles.
+            - **Run and Aim buttons**: the layout comes with `Run` (keeps B pressed, tap again to let go) and `Aim` (keeps ZR pressed). The edit mode's add list has more hold buttons (A· B· X· Y· L· R· ZL· ZR·), so every weapon can have its own set.
+            - **Idle fade**: after three seconds without a finger the controls dim towards the HUD and come back on any touch ([Android] TouchFade).
+            - **Screen fit**: Settings > Display > Screen fit - Letterbox (whole picture with bars), Fill (covers the screen, crops a little), Stretch. The picture now always lands inside the phone's screen, and a driver that reports its swapchain in the wrong shape is corrected to the window's.
+            - **Playable defaults on a phone**: the auto 3D resolution stops at 720p (the screen's own size on HD+ phones) instead of 1080p, which the Mali-G57 cannot carry - the stutter and the freezes that came with it are gone. RenderResolution / Resolution scale can change it.
+            - **FPS counter**: Settings > Display (or the Audio tab's "FPS counter") shows the frame rate, and the battery's charge beside it ([Performance] ShowFPS / ShowBattery).
+            - **Settings menu on the touch screen**: the ≡ button (bigger now, top centre) opens it; every control in it works with a finger.
+            - **Touch controls**: buttons for A B X Y, L / R / ZL / ZR, + / -, a d-pad, two floating stick zones (move and camera), a menu button and a profile switcher - multi-touch, with a haptic tick on presses.
             - **Edit mode**: Settings > Android > "Edit touch layout" closes the menu and lets a finger move any control; the toolbar adds, sizes and deletes. Saved per profile in `touch.txt` beside the settings.
             - **Profiles**: one layout per weapon if you like - "New profile" copies the current one, the on-screen ⇄ button (or the settings) switches between them mid-hunt.
-            - **Custom resolution scale**: Settings > Display > "Resolution scale (%)" renders the 3D picture at any percent of the screen (40-150); menus and HUD stay sharp.
-            - **Fullscreen, no stretch**: the picture fills the screen in its own shape (adaptive, HUD anchored) or letterboxes 16:9 - it never stretches.
+            - **Custom resolution scale**: Settings > Display > "Resolution scale (%)" renders the 3D picture at any percent (40-150); menus and HUD stay sharp.
             - **Save import / export**: Settings > Android > Save data (already upstream: copies the save to any folder and back).
             - The game code library is byte-identical to the official 0.15.1 release; only the runtime was rebuilt.
 
             ## Install
-            - The APK is signed (v2+v3) with this fork's key: **if the official app or an older build of this fork is on the phone, uninstall it first** (back up `Android/data/io.github.morerokk.mhgurecomp` - your saves are in `files/save`), then install this APK and copy the folder back. After that, updates from this fork install over each other normally.
+            - Signed (v2+v3) with this repo's key: **if the official app or an older build is on the phone, uninstall it first** (back up `Android/data/io.github.morerokk.mhgurecomp` - your saves are in `files/save`), then install this APK and copy the folder back. After that, updates from this repo install over each other normally.
 
             ## Recommended settings (Mali-G57 / Helio G100)
-            - Renderer: 100% (or "Resolution scale" 70-85% if a scene stutters), FPS cap 30, raise to 60 when stable
-            - MSAA: off (1x) - Mali pays for it dearly
+            - FPS cap 30 first; raise to 60 when a hunt holds steady. MSAA off (1x) - Mali pays for it dearly.
+            - If a scene still stutters: Settings > Display > Resolution scale 70-85%.
+            - If the picture is cut off or has bars you do not want: Settings > Display > Screen fit > Fill.
+
+            ## If something freezes
+            - Long-press the app's icon > **Share log**, and send log.txt along - it says exactly where it stopped.
 
 # (registered: push events index this file)

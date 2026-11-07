@@ -67,6 +67,9 @@ static SDL_AtomicInt live_touch_opacity;
 static SDL_AtomicInt live_touch_scale;
 static SDL_AtomicInt live_touch_sensitivity;
 static SDL_AtomicInt live_touch_haptics = {1};
+static SDL_AtomicInt live_touch_fade = {1};
+// [Display] ScreenFit: how the picture lands on the window (the present, runtime/nvn/vulkan/device.c)
+static SDL_AtomicInt live_screen_fit;
 // [Application]
 static SDL_AtomicInt confirm_exit = {1};
 static SDL_AtomicInt language = {0};
@@ -128,6 +131,8 @@ static void publish_live(const Config *c, bool all) {
     if (all || c->touch_scale != saved.touch_scale) set_float(&live_touch_scale, c->touch_scale);
     if (all || c->touch_sensitivity != saved.touch_sensitivity) set_float(&live_touch_sensitivity, c->touch_sensitivity);
     if (all || c->touch_haptics != saved.touch_haptics) SDL_SetAtomicInt(&live_touch_haptics, c->touch_haptics);
+    if (all || c->touch_fade != saved.touch_fade) SDL_SetAtomicInt(&live_touch_fade, c->touch_fade);
+    if (all || c->screen_fit != saved.screen_fit) SDL_SetAtomicInt(&live_screen_fit, c->screen_fit);
 }
 void config_store_loaded(const Config *c) {
     publish_live(c, !have_saved);
@@ -176,6 +181,8 @@ float config_live_touch_opacity(void) { return get_float(&live_touch_opacity); }
 float config_live_touch_scale(void) { return get_float(&live_touch_scale); }
 float config_live_touch_sensitivity(void) { return get_float(&live_touch_sensitivity); }
 bool config_live_touch_haptics(void) { return SDL_GetAtomicInt(&live_touch_haptics) != 0; }
+bool config_live_touch_fade(void) { return SDL_GetAtomicInt(&live_touch_fade) != 0; }
+int config_live_screen_fit(void) { return SDL_GetAtomicInt(&live_screen_fit); }
 void config_live_ldn_join(char *join, size_t size) {
     SDL_LockSpinlock(&live_ldn_lock);
     SDL_strlcpy(join, live_ldn_join, size);

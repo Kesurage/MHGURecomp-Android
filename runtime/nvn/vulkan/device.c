@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include "../../engine_module.h"
+#include "../../config.h"
 #include "../../overlay.h"
 #include "fsr.h"
 #include "vk.h"
@@ -447,7 +448,22 @@ static void create_swapchain(void) {
     // (the image then has the window's shape: some drivers give currentExtent in the screen's own portrait shape)
     if (xf == VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR && (w > h) != (ext.width > ext.height))
         ext = (VkExtent2D){ext.height, ext.width};
-    LOG("[vk] window %dx%d, screen turned %#x\n", w, h, caps.currentTransform);
+    // (last guard: a driver whose extent is in neither the window's nor the screen's shape. The window's pixel
+    // size is SDL's own view of the surface and the system scales the images to it, so it is the safe answer.)
+    if (w > 0 && h > 0) {
+        float ea = (float)ext.width / (float)ext.height, wa = (float)w / (float)h;
+        if (fabsf(ea - wa) > 0.05f * wa) {
+            LOG("[vk] extent %ux%u is not the window's shape (%dx%d): using the window's\n", ext.width, ext.height,
+                w, h);
+            ext = (VkExtent2D){(uint32_t)w, (uint32_t)h};
+        }
+    }
+    if (caps.maxImageExtent.width) ext.width = ext.width < caps.maxImageExtent.width ? ext.width : caps.maxImageExtent.width;
+    if (caps.maxImageExtent.height) ext.height = ext.height < caps.maxImageExtent.height ? ext.height : caps.maxImageExtent.height;
+    if (ext.width < caps.minImageExtent.width) ext.width = caps.minImageExtent.width;
+    if (ext.height < caps.minImageExtent.height) ext.height = caps.minImageExtent.height;
+    LOG("[vk] window %dx%d (pixels), extent %ux%u, screen turned %#x\n", w, h, ext.width, ext.height,
+        caps.currentTransform);
 #endif
     VkSwapchainKHR old = g_vk.swapchain;
     VkSwapchainCreateInfoKHR ci = {
@@ -730,9 +746,13 @@ void backend_present(NvnTexture *t) {
     vk_end_pass();
     vk_ms_resolve(b);
     if (frame_begin()) {
-        // the game's image, as large as fits with its aspect ratio, centred
-        double ww = g_vk.sc_extent.width, wh = g_vk.sc_extent.height, s = fmin(ww / t->width, wh / t->height);
-        double vw = t->width * s, vh = t->height * s;
+        // The picture on the window, by [Display] ScreenFit: Letterbox keeps it whole with bars (0), Fill covers
+        // the window and crops what sticks out (1, the viewport is larger than the window, centred), Stretch fills
+        // it exactly, distorting (2).
+        int fit = config_live_screen_fit();
+        double ww = g_vk.sc_extent.width, wh = g_vk.sc_extent.height;
+        double s = fit == 2 ? 0.0 : (fit == 1 ? fmax(ww / t->width, wh / t->height) : fmin(ww / t->width, wh / t->height));
+        double vw = fit == 2 ? ww : t->width * s, vh = fit == 2 ? wh : t->height * s;
         vk_present_draw(vk_cmd(), b, (float)((ww - vw) / 2), (float)((wh - vh) / 2), (float)vw, (float)vh);
         OverlayTarget ot = {g_vk.inst, g_vk.phys, g_vk.dev, g_vk.qfam, g_vk.queue, g_vk.pcache, sc_pass,
                             g_vk.sc_extent.width, g_vk.sc_extent.height};

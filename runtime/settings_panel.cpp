@@ -1071,6 +1071,11 @@ std::vector<Row> main_rows() {
                (int)hi("ResolutionScale"), 5, ini("ResolutionScale"));
         r.back().help = tr("Renders the 3D picture at this percent of the screen's size (0 = Auto, the screen's own), "
                            "for a steadier frame rate on a slower GPU. The menus and the HUD stay at full size.");
+        add_choice(r, "screen.fit", tr("Screen fit"), c.screen_fit,
+                   {tr("Letterbox (bars)"), tr("Fill (crop)"), tr("Stretch")}, [](int v) { s.draft.screen_fit = v; },
+                   ini("ScreenFit"));
+        r.back().help = tr("How the picture lands on a screen of another shape: Letterbox shows it whole with bars, "
+                           "Fill covers the screen and crops a little, Stretch fills it exactly (it distorts).");
         add_choice(
             r, "aspect.auto", "Automatic aspect ratio", c.aspect_ratio == 0 ? 0 : 1,
             {tr("Auto"), tr("Custom")}, [](int v) { s.draft.aspect_ratio = v ? 16.f / 9 : 0; }, ini("AspectRatio"));
@@ -1315,8 +1320,10 @@ std::vector<Row> main_rows() {
         header(r, "touch.header", tr("Touch controls"));
         add_bool(r, "touch", "On-screen controls", &c.touch, ini("TouchControls"));
         r.back().help = tr("Buttons and two stick zones over the game, for playing without a controller. Every control "
-                           "can be moved, sized, added and deleted, in profiles of their own (one per weapon, say). The "
-                           "\xE2\x89\xA1 button opens this menu, \xE2\x87\x84 switches the profile.");
+                           "can be moved, sized, added and deleted, in profiles of their own (one per weapon, say). "
+                           "The \xE2\x89\xA1 button opens this menu, \xE2\x87\x84 switches the profile. The layout "
+                           "comes with Run (B held) and Aim (ZR held): hold buttons that a tap keeps pressed until the "
+                           "next tap \xE2\x80\x94 the add list has more of them.");
         number(r, "touch.opacity", tr("Opacity"), &c.touch_opacity, lo("TouchOpacity"), hi("TouchOpacity"), 0.05f,
                ini("TouchOpacity"));
         number(r, "touch.scale", tr("Button size"), &c.touch_scale, lo("TouchScale"), hi("TouchScale"), 0.05f,
@@ -1325,6 +1332,9 @@ std::vector<Row> main_rows() {
                hi("TouchSensitivity"), 0.05f, ini("TouchSensitivity"));
         r.back().help = tr("How far a finger's drag moves the stick zones' tilt.");
         add_bool(r, "touch.haptics", tr("Vibrate on a press"), &c.touch_haptics, ini("TouchHaptics"));
+        add_bool(r, "touch.fade", tr("Fade when idle"), &c.touch_fade, ini("TouchFade"));
+        r.back().help = tr("Dims the controls after a few seconds without a finger, so the picture shows; any touch "
+                           "brings them back.");
         action(r, "touch.edit", tr("Edit touch layout"), []() { touch_request_edit(); });
         r.back().help = tr("Closes this menu and lets a finger move the controls: drag one to move it, the toolbar adds, "
                            "sizes and deletes, Done saves. The layout is kept per profile in touch.txt beside the settings.");

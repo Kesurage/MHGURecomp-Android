@@ -35,6 +35,7 @@ typedef struct {
     char label[16];    // drawn on the control (custom buttons name themselves)
     float cx, cy;      // centre, 0..1 of the window
     float r;           // radius, a fraction of the window's height
+    int hold;          // CTL_BUTTON: a toggle (tap presses, tap again lets go: a Run / Aim button)
 } Ctl;
 
 static constexpr int MAX_PROFILES = 8;
@@ -52,7 +53,17 @@ static const BtnDef BTN_DEFS[] = {
     {"\xE2\x97\x80", BTN_LEFT}, {"\xE2\x96\xB2", BTN_UP}, {"\xE2\x96\xB6", BTN_RIGHT}, {"\xE2\x96\xBC", BTN_DOWN},
     {"L3", BTN_LSTICK}, {"R3", BTN_RSTICK},
 };
+// The hold variants the add list offers (a tap keeps them pressed until the next tap: Run = B, Aim = ZR, ...).
+static const BtnDef HOLD_DEFS[] = {
+    {"A", BTN_A}, {"B", BTN_B}, {"X", BTN_X}, {"Y", BTN_Y},
+    {"L", BTN_L}, {"R", BTN_R}, {"ZL", BTN_ZL}, {"ZR", BTN_ZR},
+};
 static const char *const STICK_NAMES[] = {"Move", "Camera"};
+static int btn_of(const char *name) {
+    for (const BtnDef &d : BTN_DEFS) if (!strcmp(name, d.name)) return d.btn;
+    for (const BtnDef &d : BTN_DEFS) if (!strcasecmp(name, d.name)) return d.btn;
+    return -1;
+}
 
 static Profile *cur(void);
 static std::mutex g_lock;
@@ -65,17 +76,19 @@ static bool g_adding;             // the edit mode's add list is open
 static float cfg_opacity() { return config_live_touch_opacity(); }
 static float cfg_scale() { return config_live_touch_scale(); }
 static float cfg_sensitivity() { return config_live_touch_sensitivity(); }
+static bool cfg_fade() { return config_live_touch_fade(); }
 static bool g_edit_request;  // the settings menu's Edit touch layout, until overlay_frame takes it
+static uint64_t g_last_finger_ns;  // (g_lock) the last touch of any kind: the idle fade counts from it
 
 // The defaults: a layout for a phone held landscape (Infinix Hot 50 4G and friends). Positions are
 // guesses at a thumb's reach; the edit mode moves everything anyway.
 static void default_layout(std::vector<Ctl> &c) {
-    auto btn = [&](int b, const char *label, float x, float y, float r) {
-        c.push_back({CTL_BUTTON, b, "", x, y, r});
+    auto btn = [&](int b, const char *label, float x, float y, float r, int hold = 0) {
+        c.push_back({CTL_BUTTON, b, "", x, y, r, hold});
         snprintf(c.back().label, sizeof c.back().label, "%s", label);
     };
-    c.push_back({CTL_STICK, 0, "", 0.115f, 0.730f, 0.105f});       // move
-    c.push_back({CTL_STICK, 1, "", 0.660f, 0.745f, 0.085f});       // camera
+    c.push_back({CTL_STICK, 0, "", 0.115f, 0.730f, 0.105f, 0});       // move
+    c.push_back({CTL_STICK, 1, "", 0.660f, 0.745f, 0.085f, 0});       // camera
     btn(BTN_A, "A", 0.935f, 0.575f, 0.050f);
     btn(BTN_B, "B", 0.855f, 0.665f, 0.050f);
     btn(BTN_X, "X", 0.855f, 0.485f, 0.050f);
@@ -90,8 +103,10 @@ static void default_layout(std::vector<Ctl> &c) {
     btn(BTN_DOWN, "\xE2\x96\xBC", 0.500f, 0.950f, 0.037f);
     btn(BTN_LEFT, "\xE2\x97\x80", 0.430f, 0.898f, 0.037f);
     btn(BTN_RIGHT, "\xE2\x96\xB6", 0.570f, 0.898f, 0.037f);
-    c.push_back({CTL_MENU, 0, "", 0.500f, 0.050f, 0.030f});
-    c.push_back({CTL_PROFILE, 0, "", 0.665f, 0.050f, 0.030f});
+    btn(BTN_B, "Run", 0.075f, 0.470f, 0.045f, 1);   // a tap keeps B pressed: sprinting (let go with a tap)
+    btn(BTN_ZR, "Aim", 0.925f, 0.290f, 0.045f, 1);  // a tap keeps ZR pressed: the bow's draw, the bowgun's aim
+    c.push_back({CTL_MENU, 0, "", 0.500f, 0.050f, 0.042f, 0});
+    c.push_back({CTL_PROFILE, 0, "", 0.665f, 0.050f, 0.040f, 0});
 }
 
 static void make_default_profiles(void) {
@@ -125,11 +140,19 @@ static void save_locked(void) {
     FILE *f = fopen(tmp, "wb");
     if (!f) { LOG("[touch] cannot write %s\n", path); return; }
     fprintf(f, "; MHGU Recomp touch controls (runtime/touch.cpp). A profile per weapon, say; the app's\n"
-               "; edit mode writes this file. button: <BtnDef name> <x> <y> <r>; stick: L|R; menu; profile.\n");
+               "; edit mode writes this file. button: <name> <x> <y> <r> [hold [label]]; stick: L|R; menu; profiles.\n"
+               "; hold: a tap keeps the button pressed until the next tap (Run, Aim).\n");
     for (const Profile &p : g_profiles) {
         fprintf(f, "\nprofile %s\n", p.name);
         for (const Ctl &c : p.ctls) {
-            if (c.kind == CTL_BUTTON) fprintf(f, "button %s %.4f %.4f %.4f\n", c.label, (double)c.cx, (double)c.cy, (double)c.r);
+            if (c.kind == CTL_BUTTON) {
+                const char *def = c.label;
+                for (const BtnDef &d : BTN_DEFS) if (d.btn == c.btn) { def = d.name; break; }
+                fprintf(f, "button %s %.4f %.4f %.4f", def, (double)c.cx, (double)c.cy, (double)c.r);
+                if (c.hold) fprintf(f, " hold");
+                if (strcmp(c.label, def)) fprintf(f, " %s", c.label);
+                fprintf(f, "\n");
+            }
             else if (c.kind == CTL_STICK) fprintf(f, "stick %s %.4f %.4f %.4f\n", STICK_NAMES[c.btn], (double)c.cx, (double)c.cy, (double)c.r);
             else if (c.kind == CTL_MENU) fprintf(f, "menu %.4f %.4f %.4f\n", (double)c.cx, (double)c.cy, (double)c.r);
             else fprintf(f, "profiles %.4f %.4f %.4f\n", (double)c.cx, (double)c.cy, (double)c.r);
@@ -167,16 +190,21 @@ static void load_locked(void) {
         }
         if (!have) { snprintf(cur_p.name, sizeof cur_p.name, "Default"); have = true; }
         float x, y, r;
-        if (sscanf(s, "button %15s", arg) == 1 && parse_two(strchr(s, arg - s) + strlen(arg) + 1, &x, &y, &r)) {
-            int btn = -1;
+        char rest[80] = "";
+        if (sscanf(s, "button %15s %f %f %f %79[^\n]", arg, &x, &y, &r, rest) >= 4) {
+            int btn = btn_of(arg);
             const char *label = arg;
-            for (const BtnDef &d : BTN_DEFS)
-                if (!strcmp(arg, d.name)) btn = d.btn;
-            if (btn < 0)  // (a custom label: find the button it was added as, or a button by its Switch name)
-                for (const BtnDef &d : BTN_DEFS)
-                    if (!strcasecmp(arg, d.name)) { btn = d.btn; label = d.name; }
+            bool hold = false;
+            char *p = rest;
+            while (*p == ' ' || *p == '\t') p++;
+            if (!strncmp(p, "hold", 4) && (p[4] == 0 || p[4] == ' ' || p[4] == '\t')) {
+                hold = true;
+                p += 4;
+                while (*p == ' ' || *p == '\t') p++;
+            }
+            if (*p) label = p;  // (a custom name, e.g. Run or Aim)
             if (btn >= 0 && x >= 0 && x <= 1 && y >= 0 && y <= 1 && r > 0.005f && r < 0.5f) {
-                Ctl c{CTL_BUTTON, btn, "", x, y, r};
+                Ctl c{CTL_BUTTON, btn, "", x, y, r, hold ? 1 : 0};
                 snprintf(c.label, sizeof c.label, "%s", label);
                 cur_p.ctls.push_back(c);
             }
@@ -283,11 +311,12 @@ bool touch_event(const SDL_Event *e) {
     if (e->type == SDL_EVENT_FINGER_UP && slot >= g_down.size()) return false;
 
     if (g_editing) return edit_event(e, slot, fx, fy, w, h);  // (declared below; consumes everything)
+    if (e->type != SDL_EVENT_FINGER_MOTION) g_last_finger_ns = SDL_GetTicksNS();  // (the fade wakes on a touch)
 
     if (e->type == SDL_EVENT_FINGER_UP) {
         if (g_hit[slot] >= 0) {
             Ctl &c = cur()->ctls[g_hit[slot]];
-            if (c.kind == CTL_BUTTON) g_buttons &= ~B(c.btn);
+            if (c.kind == CTL_BUTTON && !c.hold) g_buttons &= ~B(c.btn);  // (a hold button keeps its bit for the next tap)
             else if (c.kind == CTL_STICK) g_stick[c.btn][0] = g_stick[c.btn][1] = 0;
         }
         g_down.erase(g_down.begin() + slot);
@@ -307,7 +336,8 @@ bool touch_event(const SDL_Event *e) {
         g_hit[slot] = i;
         const Ctl &c = cur()->ctls[i];
         if (c.kind == CTL_BUTTON) {
-            g_buttons |= B(c.btn);
+            if (c.hold) g_buttons ^= B(c.btn);  // (a toggle: tap presses, tap again lets go)
+            else g_buttons |= B(c.btn);
             haptic_tick();
         } else if (c.kind == CTL_STICK) {
             g_stick[c.btn][0] = g_stick[c.btn][1] = 0;
@@ -469,12 +499,56 @@ static bool edit_event(const SDL_Event *e, size_t slot, float fx, float fy, int 
 
 static ImU32 alpha(ImU32 rgb, float a) { return (rgb & 0x00FFFFFFu) | (ImU32)(a * 255.0f) << 24; }
 
+// The buttons' colours: the face buttons like the pad's (green A, red B, blue X, yellow Y), the shoulders a
+// blue-grey, so a glance says which is which without reading (Xash3D-style at-a-glance controls).
+static ImU32 btn_color(int btn, float op) {
+    int r = 205, g = 208, b = 218;
+    if (btn == BTN_A) { r = 110, g = 210, b = 90; }
+    else if (btn == BTN_B) { r = 236, g = 95, b = 85; }
+    else if (btn == BTN_X) { r = 90, g = 152, b = 240; }
+    else if (btn == BTN_Y) { r = 246, g = 206, b = 70; }
+    else if (btn == BTN_ZL || btn == BTN_ZR) { r = 168, g = 174, b = 194; }
+    else if (btn == BTN_L || btn == BTN_R) { r = 148, g = 192, b = 226; }
+    return IM_COL32(r, g, b, (ImU32)(op * 255.0f));
+}
+
 static void draw_ctl(ImDrawList *dl, ImFont *font, const Ctl &c, float px, float py, float rad, float op,
                      bool held, bool selected, float stickx, float sticky) {
-    float fill = held ? 84.0f : 34.0f;
     ImU32 ink = alpha(0xFFFFFF, op * (held ? 0.95f : 0.62f));
-    dl->AddCircleFilled(ImVec2(px, py), rad, alpha(0xFFFFFF, op * fill / 255.0f), 40);
-    dl->AddCircle(ImVec2(px, py), rad, ink, 40, std::max(1.5f, rad * 0.045f));
+    bool face = c.kind == CTL_BUTTON && (c.btn == BTN_A || c.btn == BTN_B || c.btn == BTN_X || c.btn == BTN_Y);
+    bool bumper = c.kind == CTL_BUTTON && (c.btn == BTN_L || c.btn == BTN_R || c.btn == BTN_ZL || c.btn == BTN_ZR);
+    bool dpad = c.kind == CTL_BUTTON &&
+                (c.btn == BTN_UP || c.btn == BTN_DOWN || c.btn == BTN_LEFT || c.btn == BTN_RIGHT);
+    if (face) {
+        dl->AddCircleFilled(ImVec2(px, py), rad, btn_color(c.btn, op * (held ? 0.80f : 0.30f)), 40);
+        dl->AddCircle(ImVec2(px, py), rad, btn_color(c.btn, op * (held ? 1.0f : 0.85f)), 40, std::max(1.5f, rad * 0.06f));
+    } else if (bumper) {
+        // a bumper: a rounded bar wider than it is tall, like the switch's
+        float w = rad * 1.30f, h = rad * 0.64f;
+        dl->AddRectFilled(ImVec2(px - w, py - h), ImVec2(px + w, py + h), btn_color(c.btn, op * (held ? 0.75f : 0.26f)), h * 0.8f);
+        dl->AddRect(ImVec2(px - w, py - h), ImVec2(px + w, py + h), btn_color(c.btn, op * (held ? 1.0f : 0.85f)), h * 0.8f, 0,
+                    std::max(1.5f, rad * 0.06f));
+    } else if (dpad) {
+        // the d-pad's arm: a bar from the centre out, so the four make a cross
+        float inner = rad * 0.16f, outer = rad, half = rad * 0.42f;
+        float x0 = c.btn == BTN_LEFT ? -outer : c.btn == BTN_RIGHT ? inner : -half;
+        float x1 = c.btn == BTN_LEFT ? -inner : c.btn == BTN_RIGHT ? outer : half;
+        float y0 = c.btn == BTN_UP ? -outer : c.btn == BTN_DOWN ? inner : -half;
+        float y1 = c.btn == BTN_UP ? -inner : c.btn == BTN_DOWN ? outer : half;
+        dl->AddRectFilled(ImVec2(px + x0, py + y0), ImVec2(px + x1, py + y1),
+                          alpha(0xFFFFFF, op * (held ? 84 : 36) / 255.0f), rad * 0.22f);
+        dl->AddRect(ImVec2(px + x0, py + y0), ImVec2(px + x1, py + y1), ink, rad * 0.22f, 0, std::max(1.2f, rad * 0.045f));
+    } else if (c.kind == CTL_BUTTON && c.hold) {
+        // a hold button: a rounded square with an amber ring, so it reads as "stays pressed"
+        float k = rad * 0.94f;
+        dl->AddRectFilled(ImVec2(px - k, py - k), ImVec2(px + k, py + k), alpha(0xFFFFFF, op * (held ? 84 : 34) / 255.0f), rad * 0.34f);
+        dl->AddRect(ImVec2(px - k, py - k), ImVec2(px + k, py + k),
+                    IM_COL32(255, 178, 64, (ImU32)(op * (held ? 240 : 150))), rad * 0.34f, 0, std::max(1.5f, rad * 0.06f));
+    } else {
+        float fill = held ? 84.0f : 34.0f;
+        dl->AddCircleFilled(ImVec2(px, py), rad, alpha(0xFFFFFF, op * fill / 255.0f), 40);
+        dl->AddCircle(ImVec2(px, py), rad, ink, 40, std::max(1.5f, rad * 0.045f));
+    }
     if (c.kind == CTL_STICK) {
         float kx = px + stickx * rad * 0.55f, ky = py - sticky * rad * 0.55f;
         dl->AddCircleFilled(ImVec2(kx, ky), rad * 0.38f, alpha(0xFFFFFF, op * (held ? 150 : 90) / 255.0f), 32);
@@ -493,7 +567,7 @@ static void draw_ctl(ImDrawList *dl, ImFont *font, const Ctl &c, float px, float
 
 void touch_draw(float ui_scale) {
     bool edit, adding;
-    int selected;
+    int selected, fingers;
     float op, scale;
     Profile p;
     float sticks[2][2];
@@ -511,6 +585,13 @@ void touch_draw(float ui_scale) {
         p = *cur();
         memcpy(sticks, g_stick, sizeof sticks);
         buttons = g_buttons;
+        fingers = (int)g_down.size();
+    }
+    // Xash3D-style idle fade: with no finger down for a while the controls dim to near the HUD, and any touch
+    // brings them back ([Android] TouchFade).
+    if (!edit && cfg_fade() && !fingers && !buttons) {
+        double idle = (double)(SDL_GetTicksNS() - g_last_finger_ns) * 1e-9;
+        if (idle > 3.0) op *= std::clamp(1.0f - (float)((idle - 3.0) / 0.8), 0.30f, 1.0f);
     }
     ImGuiViewport *vp = ImGui::GetMainViewport();
     float W = vp->Size.x, H = vp->Size.y;
@@ -608,6 +689,19 @@ void touch_draw(float ui_scale) {
                 if (ImGui::Button(id)) {
                     std::lock_guard<std::mutex> l(g_lock);
                     cur()->ctls.push_back({CTL_STICK, s, "", 0.5f, 0.5f, 0.10f});
+                    g_selected = (int)cur()->ctls.size() - 1;
+                    g_adding = false;
+                }
+            }
+            for (const BtnDef &d : HOLD_DEFS) {  // (the hold buttons: a tap keeps them pressed — Run, Aim, ...)
+                ImGui::SameLine();
+                char id[24];
+                snprintf(id, sizeof id, "%s\xC2\xB7##hold", d.name);
+                if (ImGui::Button(id)) {
+                    std::lock_guard<std::mutex> l(g_lock);
+                    Ctl c{CTL_BUTTON, d.btn, "", 0.5f, 0.42f, 0.045f, 1};
+                    snprintf(c.label, sizeof c.label, "%s", d.name);
+                    cur()->ctls.push_back(c);
                     g_selected = (int)cur()->ctls.size() - 1;
                     g_adding = false;
                 }

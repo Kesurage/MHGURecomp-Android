@@ -78,6 +78,8 @@ typedef struct {
     float touch_scale;        // their size, times the layout's
     float touch_sensitivity;  // the on-screen sticks' tilt multiplier, 0.2..2
     int touch_haptics;        // a short tick of the vibrator when a control takes a finger
+    int touch_fade;           // [Android] TouchFade: dim the controls after a few seconds without a finger
+    int screen_fit;           // [Display] ScreenFit: SCREEN_FIT_*: how the picture lands on a screen of another shape
     int render_scale;         // [Display] ResolutionScale: the 3D picture at this percent of the screen (0: Auto)
     int updates;              // [Application] Updates: UPDATES_*, read by the updater (updater/updater.c), not the game
     int shader_prewarm;       // [Performance] ShaderPrewarm: translate the game's shaders at start-up (nvn/vulkan/exec.c)
@@ -207,7 +209,8 @@ bool config_live_touch_enabled(void);
 float config_live_touch_opacity(void);
 float config_live_touch_scale(void);
 float config_live_touch_sensitivity(void);
-bool config_live_touch_haptics(void);    // [Bonus Content] BonusContent: each time the game opens a save (services/bonus.c)
+bool config_live_touch_haptics(void);
+bool config_live_touch_fade(void);   // [Android] TouchFade as saved, atomic (the touch layer, runtime/touch.cpp)
 int config_live_discord(void);         // [Discord] RichPresence
 int config_live_discord_hunter(void);  // [Discord] ShowHunter
 int config_live_share_urgent(void);    // [Multiplayer] ShareUrgentCredit
@@ -220,6 +223,7 @@ bool config_confirm_exit(void); // atomic, safe on the host main thread
 bool config_menu_chord(void);   // [Controls] MenuChord as saved, atomic (the input is read on another thread)
 int config_show_battery(void);  // [Performance] ShowBattery as saved, atomic
 bool config_show_fps(void);     // [Performance] ShowFPS as saved, atomic (the game's thread draws it)
+int config_live_screen_fit(void);  // [Display] ScreenFit as saved, atomic (the present, runtime/nvn/vulkan/device.c)
 
 #ifdef __cplusplus
 }
