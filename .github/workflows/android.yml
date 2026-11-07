@@ -204,3 +204,5 @@ jobs:
             ## Recommended settings (Mali-G57 / Helio G100)
             - Renderer: 100% (or "Resolution scale" 70-85% if a scene stutters), FPS cap 30, raise to 60 when stable
             - MSAA: off (1x) - Mali pays for it dearly
+
+# (registered: push events index this file)
